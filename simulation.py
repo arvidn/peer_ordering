@@ -209,7 +209,31 @@ def render():
 
 	os.system('sfdp -oframes/frame%d.png -Tpng dots/frame%d.dot' % (tick, tick))
 
+	histogram = {}
+	for n,conns in est_connections.iteritems():
+		rank = len(conns)
+		if not rank in histogram: histogram[rank] = 1
+		else: histogram[rank] += 1
 
+	f = open('plots/frame%d.dat' % tick, 'w+')
+	for i,n in histogram.iteritems():
+		print >>f, '%d %d' % (i, n)
+	f.close();
+
+	f = open('plots/render.gnuplot', 'w+')
+	print >>f, 'set term png size 600,300'
+	print >>f, 'set output "plots/frame%d.png"' % tick
+	print >>f, 'set ylabel "number of peers"'
+	print >>f, 'set xlabel "number of connections"'
+	print >>f, 'set style fill solid'
+	print >>f, 'set xrange [0:*]'
+	print >>f, 'plot "plots/frame%d.dat" using 1:2 with boxes' % tick
+	f.close()
+
+	os.system('gnuplot plots/render.gnuplot')
+
+try: os.mkdir('plots')
+except: pass
 try: os.mkdir('dots')
 except: pass
 try: os.mkdir('frames')
