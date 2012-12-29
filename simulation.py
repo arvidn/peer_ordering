@@ -47,7 +47,7 @@ use_global_knowledge = True
 # this is the target number of peers in the swarm. Each simulation
 # tick introduces one more peer. This also indirectly determines
 # the length of the simulation run, which is 150% of this setting
-swarm_size = 300
+swarm_size = 50
 
 # set this to 0 to supress debug logging, set to 2 to make it
 # more verbose
@@ -71,6 +71,16 @@ connection_attempts = {}
 # map node -> [node, ...]
 # the nodes each node knows about, but are not connected to
 known_peers = {}
+
+# number of connection attempts per tick, used for graphing
+attempts_per_tick = []
+
+# number of connection attempts being rejected each tick
+rejects_per_tick = []
+
+# number of established connections being replaced each tick
+# (because of a higher ranking peer connecting)
+replacements_per_tick = []
 
 # this is the global priority function of connections/node pairs
 def prio(n1, n2):
@@ -112,6 +122,8 @@ def maybe_connect_more_peers(n):
 		and len(known_peers[n]) > 0:
 		connection_attempts[n].append(known_peers[n].pop(0))
 
+		attempts_per_tick[tick] += 1
+
 # add peer 'n' to the swarm
 def add_new_peer(n):
 	# get peers from tracker
@@ -129,9 +141,10 @@ def add_new_peer(n):
 
 # take one step in the simulation
 def step():
-	global tick
-	tick += 1
 	print '==== TICK: %-4d ===' % tick
+	rejects_per_tick.append(0)
+	replacements_per_tick.append(0)
+	attempts_per_tick.append(0)
 
 	# resolve connection attempts
 	for n in peers_in_swarm:
@@ -174,6 +187,13 @@ def step():
 				known_peers[connections[0]].append(a)
 				est_connections[a].append(n)
 				est_connections[n].append(a)
+
+				replacements_per_tick[tick] += 1
+
+			else:
+				# connection attempt rejected
+				rejects_per_tick[tick] += 1
+
 			try: known_peers[a].remove(n)
 			except: pass
 			try: known_peers[n].remove(a)
@@ -207,7 +227,7 @@ def render():
 	print >>f, '}'
 	f.close()
 
-	os.system('sfdp -oframes/frame%d.png -Tpng dots/frame%d.dot' % (tick, tick))
+	os.system('sfdp -oframes/frame%d.png -Tpng dots/frame%d.dot &' % (tick, tick))
 
 	histogram = {}
 	for n,conns in est_connections.iteritems():
@@ -215,22 +235,47 @@ def render():
 		if not rank in histogram: histogram[rank] = 1
 		else: histogram[rank] += 1
 
-	f = open('plots/frame%d.dat' % tick, 'w+')
+	f = open('dots/frame%d.dat' % tick, 'w+')
 	for i,n in histogram.iteritems():
 		print >>f, '%d %d' % (i, n)
 	f.close();
 
-	f = open('plots/render.gnuplot', 'w+')
+	f = open('dots/render_rank_histogram%d.gnuplot' % tick, 'w+')
 	print >>f, 'set term png size 600,300'
 	print >>f, 'set output "plots/frame%d.png"' % tick
 	print >>f, 'set ylabel "number of peers"'
 	print >>f, 'set xlabel "number of connections"'
 	print >>f, 'set style fill solid'
-	print >>f, 'set xrange [0:*]'
-	print >>f, 'plot "plots/frame%d.dat" using 1:2 with boxes' % tick
+	print >>f, 'set xrange [0:%d]' % (max_peers + 1)
+	print >>f, 'set yrange [0:*]'
+	print >>f, 'set boxwidth 1'
+	print >>f, 'plot "dots/frame%d.dat" using 1:2 with boxes' % tick
 	f.close()
 
-	os.system('gnuplot plots/render.gnuplot')
+	os.system('gnuplot dots/render_rank_histogram%d.gnuplot &' % tick)
+
+def plot_list(samples, name):
+	f = open('dots/%s.dat' % name, 'w+')
+	counter = 0
+	for i in samples:
+		print >>f, '%d %d' % (counter, i)
+		counter += 1
+	f.close();
+
+	f = open('dots/render_%s.gnuplot' % name, 'w+')
+	print >>f, 'set term png size 800,300'
+	print >>f, 'set output "plots/%s.png"' % name
+	print >>f, 'set ylabel "%s"' % name
+	print >>f, 'set xlabel "tick"'
+	print >>f, 'plot "dots/%s.dat" using 1:2 with steps' % name
+	f.close()
+
+	os.system('gnuplot dots/render_%s.gnuplot &' % name)
+
+
+
+## main program ##
+
 
 try: os.mkdir('plots')
 except: pass
@@ -239,12 +284,19 @@ except: pass
 try: os.mkdir('frames')
 except: pass
 
-for i in xrange(0, int(swarm_size * 1.5)):
+for i in xrange(0, int(swarm_size * 3)):
 
 	step()
 
-	if (len(peers_in_swarm) < swarm_size):
+	# add a new peer every other tick
+	if len(peers_in_swarm) < swarm_size and i % 2 == 0:
 		add_new_peer(len(peers_in_swarm))
 
 	render()
+
+	tick += 1
+
+plot_list(attempts_per_tick, 'connection_attempts')
+plot_list(rejects_per_tick, 'connection_rejects')
+plot_list(replacements_per_tick, 'connection_replacements')
 
