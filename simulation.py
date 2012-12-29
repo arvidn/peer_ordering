@@ -14,45 +14,55 @@
 # or more specifically, 'graphviz'.
 # 
 #TODO: simulate proper peer-exchange 
-#TODO: make the settings configurable from the command line
 
 import hashlib
 import random
 import os
 import math
+import argparse
+
+parser = argparse.ArgumentParser(description='simulate connectivity in a bittorrent swarm')
 
 # ======= settings ==========
 
 # this is the max number of peer connections each peer has
-max_peers = 10
+parser.add_argument('--max-peers', dest='max_peers', default=10, type=int, help='the max number of connections each peer can have')
+
+# this is the target number of peers in the swarm. Each simulation
+# tick introduces one more peer. This also indirectly determines
+# the length of the simulation run, which is 150% of this setting
+parser.add_argument('--swarm-size', dest='swarm_size', default=100, type=int, help='the total size of the swarm to simulate')
 
 # this is the number of peers the tracker responds with
-peers_from_tracker = 40
+parser.add_argument('--peers-from-tracker', dest='peers_from_tracker', default=40, type=int, help='the number of peers returned from the tracker')
 
 # this is the number of connection attempts each peer can
 # have outstanding at any given time (it's also limited
 # by max_peers)
-half_open_limit = 10
+parser.add_argument('--half-open-limit', dest='half_open_limit', default=10, type=int, help='the max number of outstanding connection attempts per peer')
 
 # peer ordering turns on and off the global connection ranking
-use_peer_ordering = True
-#use_peer_ordering = False
+parser.add_argument('--no-peer-ordering', dest='use_peer_ordering', default=True, action='store_const', const=False, help='disable global peer ranking in accepting connections')
 
 # global knowledge is a simplification of taking DHT and PEX into
 # account. When enabled, every peer magically knows about every
 # other peer. When disabled, peers only know about a subset of
 # peers that existed by the time they joined the swarm, and peers
 # that have attempted to connect to them
-use_global_knowledge = True
+parser.add_argument('--no-global-knowledge', dest='use_global_knowledge', default=True, action='store_const', const=False, \
+	help='disable global knowledge of all peers (makes peers only know about a subset of the other peers)')
 
-# this is the target number of peers in the swarm. Each simulation
-# tick introduces one more peer. This also indirectly determines
-# the length of the simulation run, which is 150% of this setting
-swarm_size = 50
+# disable rendering the dot graphs for each step
+parser.add_argument('--no-graph-plot', dest='plot_graph', default=True, action='store_const', const=False, help='disable rendering the graph for each step')
+
+# render node rank histogram for each step
+parser.add_argument('--plot-rank-histogram', dest='plot_rank_histogram', default=False, action='store_const', const=True, help='render a histogram of node rank for each step')
 
 # set this to 0 to supress debug logging, set to 2 to make it
 # more verbose
-logging = 0
+parser.add_argument('--logging', dest='logging', default=0, type=int, help='enable logging (1=moderate logging 2=verbose logging)')
+
+settings = parser.parse_args()
 
 # ======= global state ==========
 
@@ -92,7 +102,7 @@ join_time = {}
 # the number of peers each peer has been able to connect to.
 # we keep all the numbers so that we can extract percentiles
 # out of it. This is an indication of the startup time or
-# time it takes to join the swarm. The first 'max_peers' nodes
+# time it takes to join the swarm. The first 'settings.max_peers' nodes
 # are ignored because their join time is limited by the rate
 # at which new peers join the swarm, not how well they can
 # connect to other peers
@@ -116,25 +126,25 @@ def maybe_connect_more_peers(n):
 	if not n in est_connections: est_connections[n] = []
 	if not n in connection_attempts: connection_attempts[n] = []
 
-	if len(est_connections[n]) + len(connection_attempts[n]) >= max_peers:
+	if len(est_connections[n]) + len(connection_attempts[n]) >= settings.max_peers:
 		return
 
 	# if global knowledge is enabled, always update the known peers list
 	# from the global peer list (filtering out peers we're already connected
 	# to, connecting to and ourself)
-	if use_global_knowledge:
+	if settings.use_global_knowledge:
 		known_peers[n] = filter(lambda x: x != n and not x in connection_attempts[n] and not x in est_connections[n], list(peers_in_swarm))
 
 	# if we're using peer priorities
 	# order the peers we got based on
 	# their priority, otherwise shuffle the peers
-	if use_peer_ordering:
+	if settings.use_peer_ordering:
 		known_peers[n].sort(key = lambda x: prio(n, x), reverse = True)
 	else:
 		random.shuffle(known_peers[n])
 
-	while len(est_connections[n]) + len(connection_attempts[n]) < max_peers \
-		and len(connection_attempts[n]) < half_open_limit \
+	while len(est_connections[n]) + len(connection_attempts[n]) < settings.max_peers \
+		and len(connection_attempts[n]) < settings.half_open_limit \
 		and len(known_peers[n]) > 0:
 		connection_attempts[n].append(known_peers[n].pop(0))
 
@@ -146,9 +156,9 @@ def add_new_peer(n):
 
 	peers = list(peers_in_swarm)
 	random.shuffle(peers)
-	peers = peers[0:peers_from_tracker]
+	peers = peers[0:settings.peers_from_tracker]
 	known_peers[n] = peers
-	if logging > 1:
+	if settings.logging > 1:
 		print 'adding peer "%d", tracker: ', peers
 
 	peers_in_swarm.add(n)
@@ -169,17 +179,17 @@ def step():
 			# n is trying to connect to a
 			if not a in est_connections: est_connections[a] = []
 			if not n in est_connections: est_connections[n] = []
-			if logging > 1:
+			if settings.logging > 1:
 				print '%d connecting to %d' % (n, a)
 			if not n in known_peers[a] \
 				and not n in est_connections[a] \
 				and not n in connection_attempts[a]:
 				known_peers[a].append(n)
 
-			if logging > 1:
+			if settings.logging > 1:
 				print '%d knows about %d' % (a, n)
 			connections = sorted(est_connections[a], key = lambda x: prio(n, x))
-			if logging > 1:
+			if settings.logging > 1:
 				print '%d has connections: ' % (a), connections
 
 			if a in est_connections[n]:
@@ -187,16 +197,16 @@ def step():
 				# peers connect to each other simultaneously
 				# don't do anything, just let the attempt be removed
 				pass
-			elif len(connections) < max_peers:
+			elif len(connections) < settings.max_peers:
 				#connection attempt succeeded!
 				est_connections[a].append(n)
 				est_connections[n].append(a)
-				if logging > 0:
+				if settings.logging > 0:
 					print 'establishing %d - %d' % (n, a)
-			elif use_peer_ordering and prio(connections[0], a) < prio(n, a):
+			elif settings.use_peer_ordering and prio(connections[0], a) < prio(n, a):
 				#connection attempt succeeded!
 				#by replacing a lower ranking one
-				if logging > 0:
+				if settings.logging > 0:
 					print 'replacing %d - %d [%s] with %d - %d [%s]' % (connections[0], a, prio(connections[0], a), n, a, prio(n, a))
 				est_connections[connections[0]].remove(a)
 				est_connections[a].remove(connections[0])
@@ -218,7 +228,7 @@ def step():
 			connection_attempts[n].remove(a)
 
 		# track ramp-up time for peers
-		if n >= max_peers:
+		if n >= settings.max_peers:
 			node_time = tick - join_time[n]
 			while len(startup) <= node_time: startup.append([])
 			startup[node_time].append(len(est_connections[n]))
@@ -250,7 +260,8 @@ def render():
 	print >>f, '}'
 	f.close()
 
-	os.system('sfdp -oframes/frame%d.png -Tpng dots/frame%d.dot &' % (tick, tick))
+	if settings.plot_graph:
+		os.system('sfdp -oframes/frame%d.png -Tpng dots/frame%d.dot &' % (tick, tick))
 
 	histogram = {}
 	for n,conns in est_connections.iteritems():
@@ -258,7 +269,7 @@ def render():
 		if not rank in histogram: histogram[rank] = 1
 		else: histogram[rank] += 1
 
-	f = open('dots/frame%d.dat' % tick, 'w+')
+	f = open('dots/frame%d.txt' % tick, 'w+')
 	for i,n in histogram.iteritems():
 		print >>f, '%d %d' % (i, n)
 	f.close();
@@ -269,16 +280,17 @@ def render():
 	print >>f, 'set ylabel "number of peers"'
 	print >>f, 'set xlabel "number of connections"'
 	print >>f, 'set style fill solid'
-	print >>f, 'set xrange [0:%d]' % (max_peers + 1)
+	print >>f, 'set xrange [0:%d]' % (settings.max_peers + 1)
 	print >>f, 'set yrange [0:*]'
 	print >>f, 'set boxwidth 1'
-	print >>f, 'plot "dots/frame%d.dat" using 1:2 with boxes' % tick
+	print >>f, 'plot "dots/frame%d.txt" using 1:2 with boxes' % tick
 	f.close()
 
-	os.system('gnuplot dots/render_rank_histogram%d.gnuplot &' % tick)
+	if settings.plot_rank_histogram:
+		os.system('gnuplot dots/render_rank_histogram%d.gnuplot &' % tick)
 
 def plot_list(samples, name):
-	f = open('dots/%s.dat' % name, 'w+')
+	f = open('dots/%s.txt' % name, 'w+')
 	counter = 0
 	for i in samples:
 		print >>f, '%d %d' % (counter, i)
@@ -291,7 +303,7 @@ def plot_list(samples, name):
 	print >>f, 'set ylabel "%s"' % name
 	print >>f, 'set xlabel "tick"'
 	print >>f, 'set yrange [0:*]'
-	print >>f, 'plot "dots/%s.dat" using 1:2 with steps' % name
+	print >>f, 'plot "dots/%s.txt" using 1:2 with steps title "%s"' % (name, name)
 	f.close()
 
 	os.system('gnuplot dots/render_%s.gnuplot &' % name)
@@ -320,15 +332,19 @@ def percentile(N, percent, key=lambda x:x):
 
 def plot_percentiles(samples, name):
 
-	f = open('dots/%s.dat' % name, 'w+')
+	f = open('dots/%s.txt' % name, 'w+')
 	counter = 0
 	for i in samples:
 		i.sort()
 		if i == []: i.append(0)
 		# print 10th 90th, 20th, 80th, 30th, 70th, 40th, 60th and 50th percentiles
-		print >>f, '%d %d %d %d %d %d %d %d %d %d' \
-			% (counter, percentile(i, 0.10), percentile(i, 0.90), percentile(i, 0.2), percentile(i, 0.8), percentile(i, 0.3), percentile(i, 0.7), percentile(i, 0.4), percentile(i, 0.6), percentile(i, 0.5))
-		print 'min: %d max: %d' % (min(i), max(i))
+		print >>f, '%d %d %d %d %d %d %d %d %d %d %d %d' \
+			% (counter, min(i), max(i), \
+			percentile(i, 0.10), percentile(i, 0.90), \
+			percentile(i, 0.2), percentile(i, 0.8),\
+			percentile(i, 0.3), percentile(i, 0.7), \
+			percentile(i, 0.4), percentile(i, 0.6), \
+			percentile(i, 0.5))
 		if min(i) > 0 and min(i) == max(i): break
 		counter += 1
 	f.close();
@@ -339,18 +355,18 @@ def plot_percentiles(samples, name):
 	print >>f, 'set ylabel "%s"' % name
 	print >>f, 'set xlabel "tick"'
 	print >>f, 'set key right bottom'
-	print >>f, 'plot "dots/%s.dat" using 1:2:3 with filledcurves closed title "10th-90th percentile" lc rgb "#ffdddd",' % name,
-	print >>f, '"dots/%s.dat" using 1:4:5 with filledcurves closed title "20th-80th percentile" lc rgb "#ffbbbb",' % name,
-	print >>f, '"dots/%s.dat" using 1:6:7 with filledcurves closed title "30th-70th percentile" lc rgb "#ff9999",' % name,
-	print >>f, '"dots/%s.dat" using 1:8:9 with filledcurves closed title "40th-60th percentile" lc rgb "#ff7777",' % name,
-	print >>f, '"dots/%s.dat" using 1:10 with lines title "median" lc rgb "#cc5555"' % name,
+	print >>f, 'plot "dots/%s.txt" using 1:2:3 with filledcurves closed title "min-max" lc rgb "#ffdddd",' % name,
+	print >>f, '"dots/%s.txt" using 1:4:5 with filledcurves closed title "10th-90th percentile" lc rgb "#ffcccc",' % name,
+	print >>f, '"dots/%s.txt" using 1:6:7 with filledcurves closed title "20th-80th percentile" lc rgb "#ffbbbb",' % name,
+	print >>f, '"dots/%s.txt" using 1:8:9 with filledcurves closed title "30th-70th percentile" lc rgb "#ff9999",' % name,
+	print >>f, '"dots/%s.txt" using 1:10:11 with filledcurves closed title "40th-60th percentile" lc rgb "#ff7777",' % name,
+	print >>f, '"dots/%s.txt" using 1:12 with lines title "median" lc rgb "#cc5555"' % name,
 	f.close()
 
 	os.system('gnuplot dots/render_%s.gnuplot &' % name)
 
 
 ## main program ##
-
 
 try: os.mkdir('plots')
 except: pass
@@ -359,12 +375,12 @@ except: pass
 try: os.mkdir('frames')
 except: pass
 
-for i in xrange(0, int(swarm_size * 3)):
+for i in xrange(0, int(settings.swarm_size * 3)):
 
 	step()
 
 	# add a new peer every other tick
-	if len(peers_in_swarm) < swarm_size and i % 2 == 0:
+	if len(peers_in_swarm) < settings.swarm_size and i % 2 == 0:
 		add_new_peer(len(peers_in_swarm))
 
 	render()
