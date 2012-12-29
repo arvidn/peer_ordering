@@ -19,6 +19,7 @@
 import hashlib
 import random
 import os
+import math
 
 # ======= settings ==========
 
@@ -82,6 +83,21 @@ rejects_per_tick = []
 # (because of a higher ranking peer connecting)
 replacements_per_tick = []
 
+# maps node -> tick counter when that node was added to the swarm
+join_time = {}
+
+# this is a list of lists of integers. Each element in the
+# outermost list represents the state for all peers n ticks
+# from when they joined the swarm. Each state is a list of
+# the number of peers each peer has been able to connect to.
+# we keep all the numbers so that we can extract percentiles
+# out of it. This is an indication of the startup time or
+# time it takes to join the swarm. The first 'max_peers' nodes
+# are ignored because their join time is limited by the rate
+# at which new peers join the swarm, not how well they can
+# connect to other peers
+startup = []
+
 # this is the global priority function of connections/node pairs
 def prio(n1, n2):
 	if n1 > n2:
@@ -136,6 +152,7 @@ def add_new_peer(n):
 		print 'adding peer "%d", tracker: ', peers
 
 	peers_in_swarm.add(n)
+	join_time[n] = tick
 
 	maybe_connect_more_peers(n)
 
@@ -199,6 +216,12 @@ def step():
 			try: known_peers[n].remove(a)
 			except: pass
 			connection_attempts[n].remove(a)
+
+		# track ramp-up time for peers
+		if n >= max_peers:
+			node_time = tick - join_time[n]
+			while len(startup) <= node_time: startup.append([])
+			startup[node_time].append(len(est_connections[n]))
 
 	for n in peers_in_swarm:
 		maybe_connect_more_peers(n)
@@ -264,14 +287,66 @@ def plot_list(samples, name):
 
 	f = open('dots/render_%s.gnuplot' % name, 'w+')
 	print >>f, 'set term png size 800,300'
-	print >>f, 'set output "plots/%s.png"' % name
+	print >>f, 'set output "%s.png"' % name
 	print >>f, 'set ylabel "%s"' % name
 	print >>f, 'set xlabel "tick"'
+	print >>f, 'set yrange [0:*]'
 	print >>f, 'plot "dots/%s.dat" using 1:2 with steps' % name
 	f.close()
 
 	os.system('gnuplot dots/render_%s.gnuplot &' % name)
 
+# from: https://code.activestate.com/recipes/511478-finding-the-percentile-of-the-values/
+def percentile(N, percent, key=lambda x:x):
+	"""
+	Find the percentile of a list of values.
+
+	@parameter N - is a list of values. Note N MUST BE already sorted.
+	@parameter percent - a float value from 0.0 to 1.0.
+	@parameter key - optional key function to compute value from each element of N.
+
+	@return - the percentile of the values
+	"""
+	if not N:
+		return None
+	k = (len(N)-1) * percent
+	f = math.floor(k)
+	c = math.ceil(k)
+	if f == c:
+		return key(N[int(k)])
+	d0 = key(N[int(f)]) * (c-k)
+	d1 = key(N[int(c)]) * (k-f)
+	return d0+d1
+
+def plot_percentiles(samples, name):
+
+	f = open('dots/%s.dat' % name, 'w+')
+	counter = 0
+	for i in samples:
+		i.sort()
+		if i == []: i.append(0)
+		# print 10th 90th, 20th, 80th, 30th, 70th, 40th, 60th and 50th percentiles
+		print >>f, '%d %d %d %d %d %d %d %d %d %d' \
+			% (counter, percentile(i, 0.10), percentile(i, 0.90), percentile(i, 0.2), percentile(i, 0.8), percentile(i, 0.3), percentile(i, 0.7), percentile(i, 0.4), percentile(i, 0.6), percentile(i, 0.5))
+		print 'min: %d max: %d' % (min(i), max(i))
+		if min(i) > 0 and min(i) == max(i): break
+		counter += 1
+	f.close();
+
+	f = open('dots/render_%s.gnuplot' % name, 'w+')
+	print >>f, 'set term png size 800,300'
+	print >>f, 'set output "%s.png"' % name
+	print >>f, 'set ylabel "%s"' % name
+	print >>f, 'set xlabel "tick"'
+	print >>f, 'set key right bottom'
+	print >>f, 'plot "dots/%s.dat" using 1:2:3 with filledcurves closed title "10th-90th percentile" lc rgb "#ffdddd",' % name,
+	print >>f, '"dots/%s.dat" using 1:4:5 with filledcurves closed title "20th-80th percentile" lc rgb "#ffbbbb",' % name,
+	print >>f, '"dots/%s.dat" using 1:6:7 with filledcurves closed title "30th-70th percentile" lc rgb "#ff9999",' % name,
+	print >>f, '"dots/%s.dat" using 1:8:9 with filledcurves closed title "40th-60th percentile" lc rgb "#ff7777",' % name,
+	print >>f, '"dots/%s.dat" using 1:10 with lines title "median" lc rgb "#cc5555"' % name,
+	f.close()
+
+	os.system('gnuplot dots/render_%s.gnuplot &' % name)
 
 
 ## main program ##
@@ -299,4 +374,5 @@ for i in xrange(0, int(swarm_size * 3)):
 plot_list(attempts_per_tick, 'connection_attempts')
 plot_list(rejects_per_tick, 'connection_rejects')
 plot_list(replacements_per_tick, 'connection_replacements')
+plot_percentiles(startup, 'peer_startup')
 
