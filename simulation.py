@@ -21,6 +21,7 @@ import random
 import os
 import math
 import argparse
+import sys
 
 parser = argparse.ArgumentParser(description='simulate connectivity in a bittorrent swarm')
 
@@ -88,6 +89,9 @@ connection_attempts = {}
 # the nodes each node knows about, but are not connected to
 known_peers = {}
 
+# like known peers but have tried once and failed
+retry_peers = {}
+
 # number of connection attempts per tick, used for graphing
 attempts_per_tick = []
 
@@ -139,25 +143,20 @@ def maybe_connect_more_peers(n):
 	if not n in est_connections: est_connections[n] = []
 	if not n in connection_attempts: connection_attempts[n] = []
 
+	if len(known_peers[n]) == 0 and len(retry_peers[n]) > 0:
+		known_peers[n] = retry_peers[n]
+		retry_peers[n] = []
+
 	if len(est_connections[n]) + len(connection_attempts[n]) >= settings.max_peers:
 		return
-
-	# if global knowledge is enabled, always update the known peers list
-	# from the global peer list (filtering out peers we're already connected
-	# to, connecting to and ourself)
-#	if settings.use_global_knowledge:
-#		known_peers[n] = filter(lambda x: x != n and not x in connection_attempts[n] and not x in est_connections[n], list(peers_in_swarm))
-
-	# if we're using peer priorities
-	# order the peers we got based on
-	# their priority, otherwise shuffle the peers
-	if not settings.use_peer_ordering:
-		random.shuffle(known_peers[n])
 
 	while len(est_connections[n]) + len(connection_attempts[n]) < settings.max_peers \
 		and len(connection_attempts[n]) < settings.half_open_limit \
 		and len(known_peers[n]) > 0:
 
+		# if we're using peer priorities
+		# pick the highest ranking peers
+		# otherwise pick one at random
 		if settings.use_peer_ordering:
 			peer = max(known_peers[n], key = lambda x: prio(n, x))
 			known_peers[n].remove(peer)
@@ -186,6 +185,7 @@ def add_new_peer(n):
 		random.shuffle(peers)
 		peers = peers[0:settings.peers_from_tracker]
 		known_peers[n] = peers
+	retry_peers[n] = []
 
 	if settings.logging > 1:
 		print 'adding peer "%d", tracker: ', peers
@@ -197,7 +197,6 @@ def add_new_peer(n):
 
 # take one step in the simulation
 def step():
-	print '==== TICK: %-4d ===' % tick
 	rejects_per_tick.append(0)
 	replacements_per_tick.append(0)
 	attempts_per_tick.append(0)
@@ -208,9 +207,11 @@ def step():
 			# n is trying to connect to a
 			if not a in est_connections: est_connections[a] = []
 			if not n in est_connections: est_connections[n] = []
+
 			if settings.logging > 1:
 				print '%d connecting to %d' % (n, a)
 			if not n in known_peers[a] \
+				and not n in retry_peers[a] \
 				and not n in est_connections[a] \
 				and not n in connection_attempts[a]:
 				known_peers[a].append(n)
@@ -257,7 +258,7 @@ def step():
 				# connection attempt rejected
 				established = False
 				rejects_per_tick[tick] += 1
-				known_peers[n].append(a)
+				retry_peers[n].append(a)
 
 			if established:
 				try: known_peers[a].remove(n)
@@ -391,21 +392,23 @@ def plot_percentiles(samples, name):
 		counter += 1
 	f.close();
 
-	f = open('out/dots/render_%s.gnuplot' % name, 'w+')
-	print >>f, 'set term png size 800,300'
-	print >>f, 'set output "out/%s.png"' % name
-	print >>f, 'set ylabel "%s"' % name
-	print >>f, 'set xlabel "tick"'
-	print >>f, 'set key right bottom'
-	print >>f, 'plot "out/dots/%s.txt" using 1:2:3 with filledcurves closed title "min-max" lc rgb "#ffdddd",' % name,
-	print >>f, '"out/dots/%s.txt" using 1:4:5 with filledcurves closed title "10th-90th percentile" lc rgb "#ffcccc",' % name,
-	print >>f, '"out/dots/%s.txt" using 1:6:7 with filledcurves closed title "20th-80th percentile" lc rgb "#ffbbbb",' % name,
-	print >>f, '"out/dots/%s.txt" using 1:8:9 with filledcurves closed title "30th-70th percentile" lc rgb "#ff9999",' % name,
-	print >>f, '"out/dots/%s.txt" using 1:10:11 with filledcurves closed title "40th-60th percentile" lc rgb "#ff7777",' % name,
-	print >>f, '"out/dots/%s.txt" using 1:12 with lines title "median" lc rgb "#cc5555"' % name,
-	f.close()
+	for xlimit in xrange(0, 60, 10):
+		f = open('out/dots/render_%s_%d.gnuplot' % (name, xlimit), 'w+')
+		print >>f, 'set term png size 800,300'
+		print >>f, 'set output "out/%s_%d.png"' % (name, xlimit)
+		print >>f, 'set ylabel "connected peers"'
+		print >>f, 'set xlabel "tick"'
+		print >>f, 'set key right bottom'
+		print >>f, 'set xrange [0:%s]' % ('*' if xlimit == 0 else ('%d' % xlimit))
+		print >>f, 'plot "out/dots/%s.txt" using 1:2:3 with filledcurves closed title "min-max" lc rgb "#ffdddd",' % name,
+		print >>f, '"out/dots/%s.txt" using 1:4:5 with filledcurves closed title "10th-90th percentile" lc rgb "#ffcccc",' % name,
+		print >>f, '"out/dots/%s.txt" using 1:6:7 with filledcurves closed title "20th-80th percentile" lc rgb "#ffbbbb",' % name,
+		print >>f, '"out/dots/%s.txt" using 1:8:9 with filledcurves closed title "30th-70th percentile" lc rgb "#ff9999",' % name,
+		print >>f, '"out/dots/%s.txt" using 1:10:11 with filledcurves closed title "40th-60th percentile" lc rgb "#ff7777",' % name,
+		print >>f, '"out/dots/%s.txt" using 1:12 with lines title "median" lc rgb "#cc5555"' % name
+		f.close()
 
-	os.system('gnuplot out/dots/render_%s.gnuplot &' % name)
+		os.system('gnuplot out/dots/render_%s_%d.gnuplot &' % (name, xlimit))
 
 
 ## main program ##
@@ -430,6 +433,8 @@ for i in xrange(0, int(settings.swarm_size * 3)):
 	render()
 
 	tick += 1
+	print '=== TICK: %-4d : %-4d ===\r' % (tick, settings.swarm_size * 3),
+	sys.stdout.flush()
 
 plot_list(attempts_per_tick, 'connection_attempts')
 plot_list(rejects_per_tick, 'connection_rejects')
