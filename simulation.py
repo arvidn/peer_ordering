@@ -40,7 +40,7 @@ parser.add_argument('--peers-from-tracker', dest='peers_from_tracker', default=4
 # this is the number of connection attempts each peer can
 # have outstanding at any given time (it's also limited
 # by max_peers)
-parser.add_argument('--half-open-limit', dest='half_open_limit', default=10, type=int, help='the max number of outstanding connection attempts per peer')
+parser.add_argument('--half-open-limit', dest='half_open_limit', default=2, type=int, help='the max number of outstanding connection attempts per peer')
 
 # peer ordering turns on and off the global connection ranking
 parser.add_argument('--no-peer-ordering', dest='use_peer_ordering', default=True, action='store_const', const=False, help='disable global peer ranking in accepting connections')
@@ -386,7 +386,8 @@ def plot_percentiles(samples, name):
 			percentile(i, 0.3), percentile(i, 0.7), \
 			percentile(i, 0.4), percentile(i, 0.6), \
 			percentile(i, 0.5))
-		if min(i) > 0 and min(i) == max(i): break
+		# when 90% of the peers have a full peer list, stop plotting
+		if percentile(i, 0.1) == settings.max_peers: break
 		counter += 1
 	f.close();
 
