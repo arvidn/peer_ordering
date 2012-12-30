@@ -68,6 +68,8 @@ parser.add_argument('--plot-rank-histogram', dest='plot_rank_histogram', default
 # more verbose
 parser.add_argument('--logging', dest='logging', default=0, type=int, help='enable logging (1=moderate logging 2=verbose logging)')
 
+parser.add_argument('--no-plot-diameter', dest='plot_graph_diameter', default=True, action='store_const', const=False, help='disable calculating and plotting graph diameter')
+
 settings = parser.parse_args()
 
 # ======= global state ==========
@@ -116,6 +118,9 @@ join_time = {}
 # at which new peers join the swarm, not how well they can
 # connect to other peers
 startup = []
+
+# the diameter of the graph, for each tick
+diameter = []
 
 # a cache of connection priority
 # maps (node, node) -> priority
@@ -277,6 +282,42 @@ def step():
 	for n in peers_in_swarm:
 		maybe_connect_more_peers(n)
 
+def graph_diameter(conns):
+
+	# for each node, do a breadth first flood fill to
+	# find the longest path away from it. Pick the longest
+	# path encountered
+	ret = 0
+	for n in conns:
+		cur_dist = 0
+		queue = set()
+		queue.add(n)
+		distances = {}
+		while True:
+
+			# mark the nodes in queue with the current distance
+			for cur_node in queue:
+				if cur_node in distances: continue
+				distances[cur_node] = cur_dist
+
+			# replace queue with the adjacent node to those
+			cur_dist += 1
+			adjacent = set()
+			for cur_node in queue:
+				for adj in conns[cur_node]:
+					# if we've already visited this node
+					# don't add it
+					if not adj in distances: adjacent.add(adj)
+
+			queue = adjacent
+
+			# if there are no more adjacent nodes left, we're done
+			if len(queue) == 0: break
+
+		ret = max(ret, cur_dist-1)
+
+	return ret
+
 def render():
 	global tick
 	f = open('out/dots/frame%d.dot' % tick, 'w+')
@@ -331,7 +372,10 @@ def render():
 	if settings.plot_rank_histogram:
 		os.system('gnuplot out/dots/render_rank_histogram%d.gnuplot &' % tick)
 
-def plot_list(samples, name):
+	if settings.plot_graph_diameter:
+		diameter.append(graph_diameter(est_connections))
+
+def plot_list(samples, name, ylabel):
 	f = open('out/dots/%s.txt' % name, 'w+')
 	counter = 0
 	for i in samples:
@@ -342,7 +386,7 @@ def plot_list(samples, name):
 	f = open('out/dots/render_%s.gnuplot' % name, 'w+')
 	print >>f, 'set term png size 800,300'
 	print >>f, 'set output "out/%s.png"' % name
-	print >>f, 'set ylabel "%s"' % name
+	print >>f, 'set ylabel "%s"' % ylabel
 	print >>f, 'set xlabel "tick"'
 	print >>f, 'set yrange [0:*]'
 	print >>f, 'plot "out/dots/%s.txt" using 1:2 with steps title "%s"' % (name, name)
@@ -436,8 +480,10 @@ for i in xrange(0, int(settings.swarm_size * 3)):
 	print '=== TICK: %-4d : %-4d ===\r' % (tick, settings.swarm_size * 3),
 	sys.stdout.flush()
 
-plot_list(attempts_per_tick, 'connection_attempts')
-plot_list(rejects_per_tick, 'connection_rejects')
-plot_list(replacements_per_tick, 'connection_replacements')
+if settings.plot_graph_diameter:
+	plot_list(diameter, 'graph_diameter', 'diameter')
+plot_list(attempts_per_tick, 'connection_attempts', 'connection attempts')
+plot_list(rejects_per_tick, 'connection_rejects', 'connection rejects')
+plot_list(replacements_per_tick, 'connection_replacements', 'replaced connections')
 plot_percentiles(startup, 'peer_startup')
 
