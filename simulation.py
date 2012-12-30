@@ -56,6 +56,10 @@ parser.add_argument('--no-global-knowledge', dest='use_global_knowledge', defaul
 # disable rendering the dot graphs for each step
 parser.add_argument('--no-graph-plot', dest='plot_graph', default=True, action='store_const', const=False, help='disable rendering the graph for each step')
 
+# don't render the connection attempts in the state graph, as red dotted lines
+parser.add_argument('--no-plot-attempts', dest='render_connection_attempts', default=True, action='store_const', const=False, \
+	help='disable rendering of connection attempts (as red dotted lines). This may make the resulting graphs slightly easier to interpret')
+
 # render node rank histogram for each step
 parser.add_argument('--plot-rank-histogram', dest='plot_rank_histogram', default=False, action='store_const', const=True, help='render a histogram of node rank for each step')
 
@@ -289,9 +293,10 @@ def render():
 			print >>f, '"%d" -- "%d" [splines=true];' % (n, c)
 			printed_conns.add((n, c))
 
-	for n,conns in connection_attempts.iteritems():
-		for c in conns:
-			print >>f, '"%d" -- "%d" [dirType="forward", color=red, constraint=false, style=dotted, weight=0];' % (n, c)
+	if settings.render_connection_attempts:
+		for n,conns in connection_attempts.iteritems():
+			for c in conns:
+				print >>f, '"%d" -- "%d" [dirType="forward", color=red, constraint=false, style=dotted, weight=0];' % (n, c)
 
 	print >>f, '}'
 	f.close()
