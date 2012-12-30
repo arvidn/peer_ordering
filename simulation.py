@@ -278,7 +278,7 @@ def step():
 
 def render():
 	global tick
-	f = open('dots/frame%d.dot' % tick, 'w+')
+	f = open('out/dots/frame%d.dot' % tick, 'w+')
 
 	print >>f, 'graph swarm {'
 
@@ -302,7 +302,7 @@ def render():
 	f.close()
 
 	if settings.plot_graph:
-		os.system('sfdp -oframes/frame%d.png -Tpng dots/frame%d.dot &' % (tick, tick))
+		os.system('sfdp -oout/frames/frame%d.png -Tpng out/dots/frame%d.dot &' % (tick, tick))
 
 	histogram = {}
 	for n,conns in est_connections.iteritems():
@@ -310,44 +310,44 @@ def render():
 		if not rank in histogram: histogram[rank] = 1
 		else: histogram[rank] += 1
 
-	f = open('dots/frame%d.txt' % tick, 'w+')
+	f = open('out/dots/frame%d.txt' % tick, 'w+')
 	for i,n in histogram.iteritems():
 		print >>f, '%d %d' % (i, n)
 	f.close();
 
-	f = open('dots/render_rank_histogram%d.gnuplot' % tick, 'w+')
+	f = open('out/dots/render_rank_histogram%d.gnuplot' % tick, 'w+')
 	print >>f, 'set term png size 600,300'
-	print >>f, 'set output "plots/frame%d.png"' % tick
+	print >>f, 'set output "out/plots/frame%d.png"' % tick
 	print >>f, 'set ylabel "number of peers"'
 	print >>f, 'set xlabel "number of connections"'
 	print >>f, 'set style fill solid'
 	print >>f, 'set xrange [0:%d]' % (settings.max_peers + 1)
 	print >>f, 'set yrange [0:*]'
 	print >>f, 'set boxwidth 1'
-	print >>f, 'plot "dots/frame%d.txt" using 1:2 with boxes' % tick
+	print >>f, 'plot "out/dots/frame%d.txt" using 1:2 with boxes' % tick
 	f.close()
 
 	if settings.plot_rank_histogram:
-		os.system('gnuplot dots/render_rank_histogram%d.gnuplot &' % tick)
+		os.system('gnuplot out/dots/render_rank_histogram%d.gnuplot &' % tick)
 
 def plot_list(samples, name):
-	f = open('dots/%s.txt' % name, 'w+')
+	f = open('out/dots/%s.txt' % name, 'w+')
 	counter = 0
 	for i in samples:
 		print >>f, '%d %d' % (counter, i)
 		counter += 1
 	f.close();
 
-	f = open('dots/render_%s.gnuplot' % name, 'w+')
+	f = open('out/dots/render_%s.gnuplot' % name, 'w+')
 	print >>f, 'set term png size 800,300'
-	print >>f, 'set output "%s.png"' % name
+	print >>f, 'set output "out/%s.png"' % name
 	print >>f, 'set ylabel "%s"' % name
 	print >>f, 'set xlabel "tick"'
 	print >>f, 'set yrange [0:*]'
-	print >>f, 'plot "dots/%s.txt" using 1:2 with steps title "%s"' % (name, name)
+	print >>f, 'plot "out/dots/%s.txt" using 1:2 with steps title "%s"' % (name, name)
 	f.close()
 
-	os.system('gnuplot dots/render_%s.gnuplot &' % name)
+	os.system('gnuplot out/dots/render_%s.gnuplot &' % name)
 
 # from: https://code.activestate.com/recipes/511478-finding-the-percentile-of-the-values/
 def percentile(N, percent, key=lambda x:x):
@@ -373,7 +373,7 @@ def percentile(N, percent, key=lambda x:x):
 
 def plot_percentiles(samples, name):
 
-	f = open('dots/%s.txt' % name, 'w+')
+	f = open('out/dots/%s.txt' % name, 'w+')
 	counter = 0
 	for i in samples:
 		i.sort()
@@ -391,30 +391,32 @@ def plot_percentiles(samples, name):
 		counter += 1
 	f.close();
 
-	f = open('dots/render_%s.gnuplot' % name, 'w+')
+	f = open('out/dots/render_%s.gnuplot' % name, 'w+')
 	print >>f, 'set term png size 800,300'
-	print >>f, 'set output "%s.png"' % name
+	print >>f, 'set output "out/%s.png"' % name
 	print >>f, 'set ylabel "%s"' % name
 	print >>f, 'set xlabel "tick"'
 	print >>f, 'set key right bottom'
-	print >>f, 'plot "dots/%s.txt" using 1:2:3 with filledcurves closed title "min-max" lc rgb "#ffdddd",' % name,
-	print >>f, '"dots/%s.txt" using 1:4:5 with filledcurves closed title "10th-90th percentile" lc rgb "#ffcccc",' % name,
-	print >>f, '"dots/%s.txt" using 1:6:7 with filledcurves closed title "20th-80th percentile" lc rgb "#ffbbbb",' % name,
-	print >>f, '"dots/%s.txt" using 1:8:9 with filledcurves closed title "30th-70th percentile" lc rgb "#ff9999",' % name,
-	print >>f, '"dots/%s.txt" using 1:10:11 with filledcurves closed title "40th-60th percentile" lc rgb "#ff7777",' % name,
-	print >>f, '"dots/%s.txt" using 1:12 with lines title "median" lc rgb "#cc5555"' % name,
+	print >>f, 'plot "out/dots/%s.txt" using 1:2:3 with filledcurves closed title "min-max" lc rgb "#ffdddd",' % name,
+	print >>f, '"out/dots/%s.txt" using 1:4:5 with filledcurves closed title "10th-90th percentile" lc rgb "#ffcccc",' % name,
+	print >>f, '"out/dots/%s.txt" using 1:6:7 with filledcurves closed title "20th-80th percentile" lc rgb "#ffbbbb",' % name,
+	print >>f, '"out/dots/%s.txt" using 1:8:9 with filledcurves closed title "30th-70th percentile" lc rgb "#ff9999",' % name,
+	print >>f, '"out/dots/%s.txt" using 1:10:11 with filledcurves closed title "40th-60th percentile" lc rgb "#ff7777",' % name,
+	print >>f, '"out/dots/%s.txt" using 1:12 with lines title "median" lc rgb "#cc5555"' % name,
 	f.close()
 
-	os.system('gnuplot dots/render_%s.gnuplot &' % name)
+	os.system('gnuplot out/dots/render_%s.gnuplot &' % name)
 
 
 ## main program ##
 
-try: os.mkdir('plots')
+try: os.mkdir('out')
 except: pass
-try: os.mkdir('dots')
+try: os.mkdir('out/plots')
 except: pass
-try: os.mkdir('frames')
+try: os.mkdir('out/dots')
+except: pass
+try: os.mkdir('out/frames')
 except: pass
 
 for i in xrange(0, int(settings.swarm_size * 3)):
