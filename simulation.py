@@ -122,6 +122,12 @@ startup = []
 # the diameter of the graph, for each tick
 diameter = []
 
+# this is a list of lists. The top level list has one entry
+# per simulation tick. Each entry is a list of the average distance
+# to other peers, from every peers point of view. This is then
+# used to graph the percentiles of average peer distance over time
+avg_distance = []
+
 # a cache of connection priority
 # maps (node, node) -> priority
 prio_cache = {}
@@ -282,14 +288,19 @@ def step():
 	for n in peers_in_swarm:
 		maybe_connect_more_peers(n)
 
+# returns a tuple (diameter, [average node distance, ...])
+# the diameter of the graph, along with every nodes average distance
+# to other nodes. Nodes that are disconnected don't count
 def graph_diameter(conns):
 
 	# for each node, do a breadth first flood fill to
 	# find the longest path away from it. Pick the longest
 	# path encountered
 	ret = 0
+	avg_distance = []
 	for n in conns:
 		cur_dist = 0
+		distance_sum = 0
 		queue = set()
 		queue.add(n)
 		distances = {}
@@ -299,6 +310,7 @@ def graph_diameter(conns):
 			for cur_node in queue:
 				if cur_node in distances: continue
 				distances[cur_node] = cur_dist
+				distance_sum += cur_dist
 
 			# replace queue with the adjacent node to those
 			cur_dist += 1
@@ -315,8 +327,12 @@ def graph_diameter(conns):
 			if len(queue) == 0: break
 
 		ret = max(ret, cur_dist-1)
+		if len(distances) > 1:
+			# the distance to self doesn't count, so -1
+			avg_dist = distance_sum / float(len(distances) - 1)
+			avg_distance.append(avg_dist)
 
-	return ret
+	return (ret, avg_distance)
 
 def render():
 	global tick
@@ -373,7 +389,9 @@ def render():
 		os.system('gnuplot out/dots/render_rank_histogram%d.gnuplot &' % tick)
 
 	if settings.plot_graph_diameter:
-		diameter.append(graph_diameter(est_connections))
+		(d, avg_dist) = graph_diameter(est_connections)
+		diameter.append(d)
+		avg_distance.append(avg_dist)
 
 def plot_list(samples, name, ylabel):
 	f = open('out/dots/%s.txt' % name, 'w+')
@@ -416,7 +434,7 @@ def percentile(N, percent, key=lambda x:x):
 	d1 = key(N[int(c)]) * (k-f)
 	return d0+d1
 
-def plot_percentiles(samples, name):
+def plot_percentiles(samples, name, ylabel):
 
 	f = open('out/dots/%s.txt' % name, 'w+')
 	counter = 0
@@ -424,7 +442,7 @@ def plot_percentiles(samples, name):
 		i.sort()
 		if i == []: i.append(0)
 		# print 10th 90th, 20th, 80th, 30th, 70th, 40th, 60th and 50th percentiles
-		print >>f, '%d %d %d %d %d %d %d %d %d %d %d %d' \
+		print >>f, '%d %f %f %f %f %f %f %f %f %f %f %f' \
 			% (counter, min(i), max(i), \
 			percentile(i, 0.10), percentile(i, 0.90), \
 			percentile(i, 0.2), percentile(i, 0.8),\
@@ -440,7 +458,7 @@ def plot_percentiles(samples, name):
 		f = open('out/dots/render_%s_%d.gnuplot' % (name, xlimit), 'w+')
 		print >>f, 'set term png size 800,300'
 		print >>f, 'set output "out/%s_%d.png"' % (name, xlimit)
-		print >>f, 'set ylabel "connected peers"'
+		print >>f, 'set ylabel "%s"' % ylabel
 		print >>f, 'set xlabel "tick"'
 		print >>f, 'set key right bottom'
 		print >>f, 'set xrange [0:%s]' % ('*' if xlimit == 0 else ('%d' % xlimit))
@@ -482,8 +500,9 @@ for i in xrange(0, int(settings.swarm_size * 3)):
 
 if settings.plot_graph_diameter:
 	plot_list(diameter, 'graph_diameter', 'diameter')
+	plot_percentiles(avg_distance, 'average_distance', 'average distance to other peers')
 plot_list(attempts_per_tick, 'connection_attempts', 'connection attempts')
 plot_list(rejects_per_tick, 'connection_rejects', 'connection rejects')
 plot_list(replacements_per_tick, 'connection_replacements', 'replaced connections')
-plot_percentiles(startup, 'peer_startup')
+plot_percentiles(startup, 'peer_startup', 'connected peers')
 
