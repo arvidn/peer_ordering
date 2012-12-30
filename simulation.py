@@ -14,6 +14,7 @@
 # or more specifically, 'graphviz'.
 # 
 #TODO: simulate proper peer-exchange 
+#TODO: profile and optimize
 
 import hashlib
 import random
@@ -108,6 +109,10 @@ join_time = {}
 # connect to other peers
 startup = []
 
+# a cache of connection priority
+# maps (node, node) -> priority
+prio_cache = {}
+
 # this is the global priority function of connections/node pairs
 def prio(n1, n2):
 	if n1 > n2:
@@ -115,9 +120,13 @@ def prio(n1, n2):
 		n2 = n1
 		n1 = t
 
+	if (n1, n2) in prio_cache: return prio_cache[(n1, n2)]
+
 	h = hashlib.sha1()
 	h.update('%d%d' % (n1, n2))
-	return h.hexdigest()
+	p = h.hexdigest()
+	prio_cache[(n1, n2)] = p
+	return p
 
 # give node 'n' a chance to try to connect to some peers (if it
 # isn't fully connected already)
@@ -132,8 +141,8 @@ def maybe_connect_more_peers(n):
 	# if global knowledge is enabled, always update the known peers list
 	# from the global peer list (filtering out peers we're already connected
 	# to, connecting to and ourself)
-	if settings.use_global_knowledge:
-		known_peers[n] = filter(lambda x: x != n and not x in connection_attempts[n] and not x in est_connections[n], list(peers_in_swarm))
+#	if settings.use_global_knowledge:
+#		known_peers[n] = filter(lambda x: x != n and not x in connection_attempts[n] and not x in est_connections[n], list(peers_in_swarm))
 
 	# if we're using peer priorities
 	# order the peers we got based on
@@ -152,12 +161,23 @@ def maybe_connect_more_peers(n):
 
 # add peer 'n' to the swarm
 def add_new_peer(n):
-	# get peers from tracker
 
-	peers = list(peers_in_swarm)
-	random.shuffle(peers)
-	peers = peers[0:settings.peers_from_tracker]
-	known_peers[n] = peers
+	if settings.use_global_knowledge:
+		# if using global knowledge, this new peer
+		# instantly knows about everyone else
+		known_peers[n] = list(peers_in_swarm)
+
+		# if all peers have global knowlegde, tell everybody
+		# about this new peer
+		for p in peers_in_swarm:
+			known_peers[p].append(n)
+	else:
+		# get peers from tracker
+		peers = list(peers_in_swarm)
+		random.shuffle(peers)
+		peers = peers[0:settings.peers_from_tracker]
+		known_peers[n] = peers
+
 	if settings.logging > 1:
 		print 'adding peer "%d", tracker: ', peers
 
@@ -192,6 +212,7 @@ def step():
 			if settings.logging > 1:
 				print '%d has connections: ' % (a), connections
 
+			established = True
 			if a in est_connections[n]:
 				# we're already connected! This may happen when two
 				# peers connect to each other simultaneously
@@ -219,12 +240,17 @@ def step():
 
 			else:
 				# connection attempt rejected
+				established = False
 				rejects_per_tick[tick] += 1
+				if settings.use_global_knowledge:
+					known_peers[n].append(a)
 
-			try: known_peers[a].remove(n)
-			except: pass
-			try: known_peers[n].remove(a)
-			except: pass
+			if established:
+				try: known_peers[a].remove(n)
+				except: pass
+				try: known_peers[n].remove(a)
+				except: pass
+
 			connection_attempts[n].remove(a)
 
 		# track ramp-up time for peers
