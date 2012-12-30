@@ -147,15 +147,20 @@ def maybe_connect_more_peers(n):
 	# if we're using peer priorities
 	# order the peers we got based on
 	# their priority, otherwise shuffle the peers
-	if settings.use_peer_ordering:
-		known_peers[n].sort(key = lambda x: prio(n, x), reverse = True)
-	else:
+	if not settings.use_peer_ordering:
 		random.shuffle(known_peers[n])
 
 	while len(est_connections[n]) + len(connection_attempts[n]) < settings.max_peers \
 		and len(connection_attempts[n]) < settings.half_open_limit \
 		and len(known_peers[n]) > 0:
-		connection_attempts[n].append(known_peers[n].pop(0))
+
+		if settings.use_peer_ordering:
+			peer = max(known_peers[n], key = lambda x: prio(n, x))
+			known_peers[n].remove(peer)
+		else:
+			peer = known_peers[n].pop(random.randint(0, len(known_peers[n])-1))
+
+		connection_attempts[n].append(peer)
 
 		attempts_per_tick[tick] += 1
 
@@ -208,9 +213,14 @@ def step():
 
 			if settings.logging > 1:
 				print '%d knows about %d' % (a, n)
-			connections = sorted(est_connections[a], key = lambda x: prio(n, x))
+			connections = est_connections[a]
 			if settings.logging > 1:
 				print '%d has connections: ' % (a), connections
+
+			if len(connections) > 0:
+				lowest_rank_connection = connections[0]
+				if settings.use_peer_ordering:
+					lowest_rank_connection = min(connections, key = lambda x: prio(n, x))
 
 			established = True
 			if a in est_connections[n]:
@@ -224,15 +234,16 @@ def step():
 				est_connections[n].append(a)
 				if settings.logging > 0:
 					print 'establishing %d - %d' % (n, a)
-			elif settings.use_peer_ordering and prio(connections[0], a) < prio(n, a):
+			elif settings.use_peer_ordering and prio(lowest_rank_connection, a) < prio(n, a):
 				#connection attempt succeeded!
 				#by replacing a lower ranking one
 				if settings.logging > 0:
-					print 'replacing %d - %d [%s] with %d - %d [%s]' % (connections[0], a, prio(connections[0], a), n, a, prio(n, a))
-				est_connections[connections[0]].remove(a)
-				est_connections[a].remove(connections[0])
-				known_peers[a].append(connections[0])
-				known_peers[connections[0]].append(a)
+					print 'replacing %d - %d [%s] with %d - %d [%s]' % (lowest_rank_connection, a, prio(lowest_rank_connection, a), n, a, prio(n, a))
+				est_connections[lowest_rank_connection].remove(a)
+				est_connections[a].remove(lowest_rank_connection)
+				known_peers[a].append(lowest_rank_connection)
+				known_peers[lowest_rank_connection].append(a)
+
 				est_connections[a].append(n)
 				est_connections[n].append(a)
 
@@ -242,8 +253,7 @@ def step():
 				# connection attempt rejected
 				established = False
 				rejects_per_tick[tick] += 1
-				if settings.use_global_knowledge:
-					known_peers[n].append(a)
+				known_peers[n].append(a)
 
 			if established:
 				try: known_peers[a].remove(n)
