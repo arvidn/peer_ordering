@@ -10,8 +10,8 @@
 # prioritizes its connections based on this rank, in order to create a
 # more uniformly connected graph.
 # 
-# This program requires that you have 'dot' installed on your system.
-# or more specifically, 'graphviz'.
+# Requirements: 'dot' (more specifically 'graphviz'), 'gnuplot'.
+#    Mac users: All of the above and 'AquaTerm' installed prior to compiling 'gnuplot'.
 # 
 #TODO: simulate proper peer-exchange 
 #TODO: profile and optimize
